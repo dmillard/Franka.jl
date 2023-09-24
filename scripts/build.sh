@@ -13,7 +13,7 @@ julia \
 
 echo "Patching $CXX_DIR/libfranka"
 cd $CXX_DIR/libfranka
-patch -p1 < $CXX_DIR/libfranka-0001-Add-missing-include-s.patch
+patch -p1 --forward < $CXX_DIR/libfranka-0001-Add-missing-include-s.patch || true
 
 echo "Building $CXX_DIR"
 cmake \

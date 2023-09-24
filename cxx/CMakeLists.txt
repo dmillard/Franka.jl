@@ -22,6 +22,7 @@ target_link_libraries(frankajl PRIVATE
   Franka::Franka
   Eigen3::Eigen
 )
+target_compile_options(frankajl PRIVATE -Wall -Wextra -pedantic -Werror)
 
 install(TARGETS
   frankajl
