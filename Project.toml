@@ -1,0 +1,11 @@
+name = "Franka"
+uuid = "0e71ecff-7f40-40cb-9d25-b36b9debc7e4"
+authors = ["dmillard <dmillard10@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+libcxxwrap_julia_jll = "3eaa8342-bff7-56a5-9981-c04077f7cee7"

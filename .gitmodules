@@ -1,0 +1,3 @@
+[submodule "cxx/libfranka"]
+	path = cxx/libfranka
+	url = https://github.com/frankaemika/libfranka.git
