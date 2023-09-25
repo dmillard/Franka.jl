@@ -1,4 +1,4 @@
-using FrankaCommands
+using Franka
 using LinearAlgebra
 using StaticArrays
 using Rotations

@@ -6,8 +6,8 @@
 
 #include "franka/control_types.h"
 #include "franka/model.h"
-#include "franka/robot_state.h"
 #include "franka/robot.h"
+#include "franka/robot_state.h"
 
 #include <julia.h>
 
@@ -17,7 +17,6 @@
 #include "jlcxx/functions.hpp"
 #include "jlcxx/stl.hpp"
 #include "jlcxx/tuple.hpp"
-
 
 namespace {
 void _SetDefaultBehavior(franka::Robot *robot) {
@@ -128,15 +127,15 @@ void add_array_type(jlcxx::Module &mod, const std::string &name) {
       .template constructor<>()
       .template constructor<const std::array<T, N> &>();
   mod.method("size",
-             [](const std::array<T, N> &a) { return std::make_tuple(N); });
-  mod.method("length", [](const std::array<T, N> &a) { return N; });
+             [](const std::array<T, N> &) { return std::make_tuple(N); });
+  mod.method("length", [](const std::array<T, N> &) { return N; });
   mod.method("getindex", [](const std::array<T, N> &a, std::size_t i) {
     return (a)[i - 1];
   });
   mod.method("setindex!",
              [](std::array<T, N> &a, T v, std::size_t i) { (a)[i - 1] = v; });
-  mod.method("firstindex", [](const std::array<T, N> &a) { return 1; });
-  mod.method("lastindex", [](const std::array<T, N> &a) { return N; });
+  mod.method("firstindex", [](const std::array<T, N> &) { return 1; });
+  mod.method("lastindex", [](const std::array<T, N> &) { return N; });
 }
 
 #define CONST_ARRAY_GETTER(type, name)                                         \

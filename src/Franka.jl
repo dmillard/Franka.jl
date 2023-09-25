@@ -61,7 +61,7 @@ function control!(
     )
     c_controller_data = pointer_from_objref(controller)
 
-    control_driver = getfield(FrankaCommands, Symbol("_control_$OutputT"))
+    control_driver = getfield(Franka, Symbol("_control_$OutputT"))
     GC.@preserve controller begin
         control_driver(robot, c_controller_data, c_controller_function_ptr)
     end
@@ -97,7 +97,7 @@ function control!(
     c_controller_data = pointer_from_objref(controller)
     c_generator_data = pointer_from_objref(generator)
 
-    control_driver = getfield(FrankaCommands, Symbol("_control_Torques$OutputT"))
+    control_driver = getfield(Franka, Symbol("_control_Torques$OutputT"))
     GC.@preserve controller generator begin
         control_driver(
             robot,
