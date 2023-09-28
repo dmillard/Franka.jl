@@ -135,6 +135,7 @@ namespace jlcxx {
 template <> struct IsMirroredType<std::array<double, 2>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 3>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 6>> : std::false_type {};
+template <> struct IsMirroredType<std::array<bool, 6>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 7>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 9>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 16>> : std::false_type {};
@@ -146,6 +147,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module &mod) {
   AddArrayType<double, 2>(mod, "StlArray2d");
   AddArrayType<double, 3>(mod, "StlArray3d");
   AddArrayType<double, 6>(mod, "StlArray6d");
+  AddArrayType<bool, 6>(mod, "StlArray6b");
   AddArrayType<double, 7>(mod, "StlArray7d");
   AddArrayType<double, 9>(mod, "StlArray9d");
   AddArrayType<double, 16>(mod, "StlArray16d");

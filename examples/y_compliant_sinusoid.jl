@@ -34,7 +34,8 @@ Base.@kwdef mutable struct CartesianImpedanceController{
     Kd::SMatrix{6,6,Float64,36}
 end
 
-function (c::CartesianImpedanceController)(state, dt::Real)
+function (c::CartesianImpedanceController)(stateptr, dt::Real)
+    state = stateptr[]
     c.time += dt
     finished = c.time > 60.0
 
@@ -64,9 +65,14 @@ function (c::CartesianImpedanceController)(state, dt::Real)
 end
 
 function main()
-    robot = RobotInterface("172.16.0.2")
+    robot = Robot("172.16.0.2")
     automatic_error_recovery!(robot)
-    set_default_behavior!(robot)
+
+    torque_thresh = Franka.StlArray7d()
+    torque_thresh .= 99
+    force_thresh = Franka.StlArray6d()
+    force_thresh .= 500
+    set_collision_behavior!(robot, torque_thresh, torque_thresh, force_thresh, force_thresh)
 
     panda_home = [0.0, -π / 4, 0.0, -3π / 4, 0.0, π / 2, π / 4]
     control!(robot, JointGoalMotionGenerator(0.5, panda_home))

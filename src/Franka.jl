@@ -205,13 +205,21 @@ export get_O_T_EE
 export CartesianVelocities
 export get_O_dP_EE
 
-# RobotInterface
-export RobotInterface
-export set_default_behavior!
+# Robot
+export Robot
 export automatic_error_recovery!
-export control!
 export read_once
 export load_model
+export server_version
+export set_collision_behavior!
+export set_cartesian_impedance!
+export set_joint_impedance!
+export set_guiding_mode!
+export set_K!
+export set_EE!
+export set_load!
+export stop!
+export control!
 
 # Generators
 include("./generators.jl")

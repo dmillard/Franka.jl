@@ -14,7 +14,8 @@ Base.@kwdef mutable struct CartesianConstraintController{
     f::Function
 end
 
-function (c::CartesianConstraintController)(state, dt::Real)
+function (c::CartesianConstraintController)(stateptr, dt::Real)
+    state = stateptr[]
     c.time += dt
     finished = c.time > 60.0
 
@@ -45,21 +46,29 @@ function (c::CartesianConstraintController)(state, dt::Real)
 end
 
 function main()
-    robot = RobotInterface("172.16.0.2")
+    robot = Robot("172.16.0.2")
     automatic_error_recovery!(robot)
-    set_default_behavior!(robot)
+
+    torque_thresh = Franka.StlArray7d()
+    torque_thresh .= 99
+    force_thresh = Franka.StlArray6d()
+    force_thresh .= 500
+    set_collision_behavior!(robot, torque_thresh, torque_thresh, force_thresh, force_thresh)
 
     panda_home = [0.0, -π / 4, 0.0, -3π / 4, 0.0, π / 2, π / 4]
     control!(robot, JointGoalMotionGenerator(0.5, panda_home))
 
     EE = deepcopy(reshape(get_O_T_EE(read_once(robot)), 4, 4))
 
-    function f(xyz)
+    function sphere(xyz)
         x, y, z = xyz - SA[0.306, 0.0, 0.59]
         r = 0.1
-
-        #(z - 0.1 * (cos(20 * y) - 1))^2 + x^2
         return norm([x, y, z - r]) - r
+    end
+
+    function wavy(xyz)
+        x, y, z = xyz - SA[0.306, 0.0, 0.59]
+        return z - 0.05 * sin(10π * x) - 0.05 * sin(10π * y)
     end
 
     Kp_translation = 5000.0
@@ -69,7 +78,7 @@ function main()
     Kp = SMatrix{6,6,Float64}(Kp)
     Kd = SMatrix{6,6,Float64}(Kd)
 
-    torque_controller = CartesianConstraintController(; model=load_model(robot), Kp, Kd, f)
+    torque_controller = CartesianConstraintController(; model=load_model(robot), Kp, Kd, f=wavy)
 
     control!(robot, torque_controller)
 end
