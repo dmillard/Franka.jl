@@ -19,21 +19,6 @@
 #include "jlcxx/tuple.hpp"
 
 namespace {
-void _SetDefaultBehavior(franka::Robot *robot) {
-  robot->setCollisionBehavior({{99.0, 99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0}},
-                              {{99.0, 99.0, 99.0, 99.0, 99.0, 99.0}});
-  robot->setJointImpedance({{3000, 3000, 3000, 2500, 2500, 2000, 2000}});
-  constexpr double kXYZ = 3000.0;
-  constexpr double kRPY = 300.0;
-  robot->setCartesianImpedance({{kXYZ, kXYZ, kXYZ, kRPY, kRPY, kRPY}});
-}
-
 template <typename T> T Zeros();
 template <> franka::JointPositions Zeros<franka::JointPositions>() {
   return franka::JointPositions({0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
@@ -55,77 +40,60 @@ template <> franka::Torques Zeros<franka::Torques>() {
 }
 
 template <typename T>
-using FrankaCallback = void (*)(T *, void *, const franka::RobotState *,
-                                const franka::Duration *);
-} // namespace
+using FrankaControlCallback = void (*)(T *, void *, const franka::RobotState *,
+                                       const franka::Duration *);
 
-struct RobotInterface {
-  franka::Robot robot;
+template <typename T>
+void Control(franka::Robot &robot, void *data,
+             FrankaControlCallback<T> controller) {
+  auto controller_wrapper = [data, controller](const franka::RobotState &state,
+                                               franka::Duration duration) {
+    T output = Zeros<T>();
+    controller(&output, data, &state, &duration);
+    return output;
+  };
 
-  RobotInterface(const std::string &ip) : robot(ip) {}
+  controller_wrapper(robot.readOnce(), franka::Duration(0));
+  robot.control(controller_wrapper);
+}
 
-  void SetDefaultBehavior() { _SetDefaultBehavior(&robot); }
-  void AutomaticErrorRecovery() { robot.automaticErrorRecovery(); }
-
-  franka::RobotState ReadOnce() { return robot.readOnce(); }
-
-  franka::Model LoadModel() { return robot.loadModel(); }
-
-  template <typename T> void Control(void *data, FrankaCallback<T> controller) {
-    auto controller_wrapper = [data,
-                               controller](const franka::RobotState &state,
-                                           franka::Duration duration) {
-      T output = Zeros<T>();
-      controller(&output, data, &state, &duration);
-      return output;
-    };
-
-    controller_wrapper(robot.readOnce(), franka::Duration(0));
-    robot.control(controller_wrapper);
-  }
-
-  template <typename T>
-  void ControlTorques(void *controller_data,
-                      FrankaCallback<franka::Torques> controller,
-                      void *generator_data, FrankaCallback<T> generator) {
-    auto controller_wrapper = [controller_data,
-                               controller](const franka::RobotState &state,
-                                           franka::Duration duration) {
-      franka::Torques output = Zeros<franka::Torques>();
-      controller(&output, controller_data, &state, &duration);
-      return output;
-    };
-    auto generator_wrapper = [generator_data,
-                              generator](const franka::RobotState &state,
+template <typename T>
+void ControlTorques(franka::Robot &robot, void *controller_data,
+                    FrankaControlCallback<franka::Torques> controller,
+                    void *generator_data, FrankaControlCallback<T> generator) {
+  auto controller_wrapper = [controller_data,
+                             controller](const franka::RobotState &state,
                                          franka::Duration duration) {
-      T output = Zeros<T>();
-      generator(&output, generator_data, &state, &duration);
-      return output;
-    };
+    franka::Torques output = Zeros<franka::Torques>();
+    controller(&output, controller_data, &state, &duration);
+    return output;
+  };
+  auto generator_wrapper = [generator_data,
+                            generator](const franka::RobotState &state,
+                                       franka::Duration duration) {
+    T output = Zeros<T>();
+    generator(&output, generator_data, &state, &duration);
+    return output;
+  };
 
-    controller_wrapper(robot.readOnce(), franka::Duration(0));
-    generator_wrapper(robot.readOnce(), franka::Duration(0));
-    robot.control(controller_wrapper, generator_wrapper);
-  }
-};
+  controller_wrapper(robot.readOnce(), franka::Duration(0));
+  generator_wrapper(robot.readOnce(), franka::Duration(0));
+  robot.control(controller_wrapper, generator_wrapper);
+}
 
 // Implementation note: This helps work around a double registration issue in
 // CxxWrap.jl
-#define NAMED_CONTROL(type)                                                    \
-  method("_control_" #type, &RobotInterface::Control<franka::type>)
+#define NAMED_CONTROL(type) method("_control_" #type, Control<franka::type>)
 #define NAMED_CONTROL_GENERATOR(type)                                          \
-  method("_control_Torques" #type,                                             \
-         &RobotInterface::ControlTorques<franka::type>)
+  method("_control_Torques" #type, ControlTorques<franka::type>)
 
 template <typename T, std::size_t N>
-void add_array_type(jlcxx::Module &mod, const std::string &name) {
+void AddArrayType(jlcxx::Module &mod, const std::string &name) {
   auto super_type_generic = jlcxx::julia_type("AbstractVector");
   auto parameter_type = jlcxx::julia_type("Float64");
   auto super_type = jlcxx::apply_type((jl_value_t *)super_type_generic,
                                       (jl_value_t **)&parameter_type, 1);
-  mod.add_type<std::array<T, N>>(name, super_type)
-      .template constructor<>()
-      .template constructor<const std::array<T, N> &>();
+  mod.add_type<std::array<T, N>>(name, super_type).template constructor<>();
   mod.method("size",
              [](const std::array<T, N> &) { return std::make_tuple(N); });
   mod.method("length", [](const std::array<T, N> &) { return N; });
@@ -138,12 +106,12 @@ void add_array_type(jlcxx::Module &mod, const std::string &name) {
   mod.method("lastindex", [](const std::array<T, N> &) { return N; });
 }
 
-#define CONST_ARRAY_GETTER(type, name)                                         \
+#define CONST_ARRAY_GETTER(type, name, ...)                                    \
   mod.method("get_" #name, [](const type *v) {                                 \
-    return jlcxx::make_const_array(v->name.data(), v->name.size());            \
+    return jlcxx::make_const_array(v->name.data(), __VA_ARGS__);               \
   });                                                                          \
   mod.method("get_" #name, [](const type &v) {                                 \
-    return jlcxx::make_const_array(v.name.data(), v.name.size());              \
+    return jlcxx::make_const_array(v.name.data(), __VA_ARGS__);                \
   })
 
 #define CONST_VALUE_GETTER(type, name)                                         \
@@ -161,6 +129,8 @@ void add_array_type(jlcxx::Module &mod, const std::string &name) {
   mod.method("get_motion_finished",                                            \
              [](const type *v) { return v->motion_finished; });
 
+} // namespace
+
 namespace jlcxx {
 template <> struct IsMirroredType<std::array<double, 2>> : std::false_type {};
 template <> struct IsMirroredType<std::array<double, 3>> : std::false_type {};
@@ -173,14 +143,14 @@ template <> struct IsMirroredType<std::array<double, 49>> : std::false_type {};
 } // namespace jlcxx
 
 JLCXX_MODULE define_julia_module(jlcxx::Module &mod) {
-  add_array_type<double, 2>(mod, "Array2d");
-  add_array_type<double, 3>(mod, "Array3d");
-  add_array_type<double, 6>(mod, "Array6d");
-  add_array_type<double, 7>(mod, "Array7d");
-  add_array_type<double, 9>(mod, "Array9d");
-  add_array_type<double, 16>(mod, "Array16d");
-  add_array_type<double, 42>(mod, "Array42d");
-  add_array_type<double, 49>(mod, "Array49d");
+  AddArrayType<double, 2>(mod, "StlArray2d");
+  AddArrayType<double, 3>(mod, "StlArray3d");
+  AddArrayType<double, 6>(mod, "StlArray6d");
+  AddArrayType<double, 7>(mod, "StlArray7d");
+  AddArrayType<double, 9>(mod, "StlArray9d");
+  AddArrayType<double, 16>(mod, "StlArray16d");
+  AddArrayType<double, 42>(mod, "StlArray42d");
+  AddArrayType<double, 49>(mod, "StlArray49d");
 
   mod.add_type<franka::Duration>("Duration")
       .constructor<uint64_t>()
@@ -188,48 +158,48 @@ JLCXX_MODULE define_julia_module(jlcxx::Module &mod) {
       .method("to_msec", &franka::Duration::toMSec);
 
   mod.add_type<franka::RobotState>("RobotState");
-  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE);
-  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE_d);
-  CONST_ARRAY_GETTER(franka::RobotState, F_T_EE);
-  CONST_ARRAY_GETTER(franka::RobotState, F_T_NE);
-  CONST_ARRAY_GETTER(franka::RobotState, NE_T_EE);
-  CONST_ARRAY_GETTER(franka::RobotState, EE_T_K);
+  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE_d, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, F_T_EE, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, F_T_NE, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, NE_T_EE, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, EE_T_K, 4, 4);
   CONST_VALUE_GETTER(franka::RobotState, m_ee);
-  CONST_ARRAY_GETTER(franka::RobotState, I_ee);
-  CONST_ARRAY_GETTER(franka::RobotState, F_x_Cee);
+  CONST_ARRAY_GETTER(franka::RobotState, I_ee, 3, 3);
+  CONST_ARRAY_GETTER(franka::RobotState, F_x_Cee, 3);
   CONST_VALUE_GETTER(franka::RobotState, m_load);
-  CONST_ARRAY_GETTER(franka::RobotState, I_load);
-  CONST_ARRAY_GETTER(franka::RobotState, F_x_Cload);
+  CONST_ARRAY_GETTER(franka::RobotState, I_load, 3, 3);
+  CONST_ARRAY_GETTER(franka::RobotState, F_x_Cload, 3);
   CONST_VALUE_GETTER(franka::RobotState, m_total);
-  CONST_ARRAY_GETTER(franka::RobotState, I_total);
-  CONST_ARRAY_GETTER(franka::RobotState, F_x_Ctotal);
-  CONST_ARRAY_GETTER(franka::RobotState, elbow);
-  CONST_ARRAY_GETTER(franka::RobotState, elbow_d);
-  CONST_ARRAY_GETTER(franka::RobotState, elbow_c);
-  CONST_ARRAY_GETTER(franka::RobotState, delbow_c);
-  CONST_ARRAY_GETTER(franka::RobotState, ddelbow_c);
-  CONST_ARRAY_GETTER(franka::RobotState, tau_J);
-  CONST_ARRAY_GETTER(franka::RobotState, tau_J_d);
-  CONST_ARRAY_GETTER(franka::RobotState, dtau_J);
-  CONST_ARRAY_GETTER(franka::RobotState, q);
-  CONST_ARRAY_GETTER(franka::RobotState, q_d);
-  CONST_ARRAY_GETTER(franka::RobotState, dq);
-  CONST_ARRAY_GETTER(franka::RobotState, dq_d);
-  CONST_ARRAY_GETTER(franka::RobotState, ddq_d);
-  CONST_ARRAY_GETTER(franka::RobotState, joint_contact);
-  CONST_ARRAY_GETTER(franka::RobotState, cartesian_contact);
-  CONST_ARRAY_GETTER(franka::RobotState, joint_collision);
-  CONST_ARRAY_GETTER(franka::RobotState, cartesian_collision);
-  CONST_ARRAY_GETTER(franka::RobotState, tau_ext_hat_filtered);
-  CONST_ARRAY_GETTER(franka::RobotState, O_F_ext_hat_K);
-  CONST_ARRAY_GETTER(franka::RobotState, K_F_ext_hat_K);
-  CONST_ARRAY_GETTER(franka::RobotState, O_dP_EE_d);
+  CONST_ARRAY_GETTER(franka::RobotState, I_total, 3, 3);
+  CONST_ARRAY_GETTER(franka::RobotState, F_x_Ctotal, 3);
+  CONST_ARRAY_GETTER(franka::RobotState, elbow, 2);
+  CONST_ARRAY_GETTER(franka::RobotState, elbow_d, 2);
+  CONST_ARRAY_GETTER(franka::RobotState, elbow_c, 2);
+  CONST_ARRAY_GETTER(franka::RobotState, delbow_c, 2);
+  CONST_ARRAY_GETTER(franka::RobotState, ddelbow_c, 2);
+  CONST_ARRAY_GETTER(franka::RobotState, tau_J, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, tau_J_d, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, dtau_J, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, q, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, q_d, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, dq, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, dq_d, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, ddq_d, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, joint_contact, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, cartesian_contact, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, joint_collision, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, cartesian_collision, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, tau_ext_hat_filtered, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, O_F_ext_hat_K, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, K_F_ext_hat_K, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, O_dP_EE_d, 6);
   // CONST_ARRAY_GETTER(franka::RobotState, O_ddP_O);
-  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE_c);
-  CONST_ARRAY_GETTER(franka::RobotState, O_dP_EE_c);
-  CONST_ARRAY_GETTER(franka::RobotState, O_ddP_EE_c);
-  CONST_ARRAY_GETTER(franka::RobotState, theta);
-  CONST_ARRAY_GETTER(franka::RobotState, dtheta);
+  CONST_ARRAY_GETTER(franka::RobotState, O_T_EE_c, 4, 4);
+  CONST_ARRAY_GETTER(franka::RobotState, O_dP_EE_c, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, O_ddP_EE_c, 6);
+  CONST_ARRAY_GETTER(franka::RobotState, theta, 7);
+  CONST_ARRAY_GETTER(franka::RobotState, dtheta, 7);
   // TODO: Errors current_errors;
   // TODO: Errors last_motion_errors;
   CONST_VALUE_GETTER(franka::RobotState, control_command_success_rate);
@@ -254,75 +224,75 @@ JLCXX_MODULE define_julia_module(jlcxx::Module &mod) {
     return model.pose(frame, *state);
   });
   mod.method("get_pose", [](const franka::Model &model, franka::Frame frame,
-                            const std::array<double, 7> *q,
-                            const std::array<double, 16> *F_T_EE,
-                            const std::array<double, 16> *EE_T_K) {
-    return model.pose(frame, *q, *F_T_EE, *EE_T_K);
+                            const std::array<double, 7> &q,
+                            const std::array<double, 16> &F_T_EE,
+                            const std::array<double, 16> &EE_T_K) {
+    return model.pose(frame, q, F_T_EE, EE_T_K);
   });
   mod.method("get_body_jacobian",
              [](const franka::Model &model, franka::Frame frame,
-                const franka::RobotState *state) {
-               return model.bodyJacobian(frame, *state);
+                const franka::RobotState &state) {
+               return model.bodyJacobian(frame, state);
              });
   mod.method("get_body_jacobian",
              [](const franka::Model &model, franka::Frame frame,
-                const std::array<double, 7> *q,
-                const std::array<double, 16> *F_T_EE,
-                const std::array<double, 16> *EE_T_K) {
-               return model.bodyJacobian(frame, *q, *F_T_EE, *EE_T_K);
+                const std::array<double, 7> &q,
+                const std::array<double, 16> &F_T_EE,
+                const std::array<double, 16> &EE_T_K) {
+               return model.bodyJacobian(frame, q, F_T_EE, EE_T_K);
              });
   mod.method("get_zero_jacobian",
              [](const franka::Model &model, franka::Frame frame,
-                const franka::RobotState *state) {
-               return model.zeroJacobian(frame, *state);
+                const franka::RobotState &state) {
+               return model.zeroJacobian(frame, state);
              });
   mod.method("get_zero_jacobian",
              [](const franka::Model &model, franka::Frame frame,
-                const std::array<double, 7> *q,
-                const std::array<double, 16> *F_T_EE,
-                const std::array<double, 16> *EE_T_K) {
-               return model.zeroJacobian(frame, *q, *F_T_EE, *EE_T_K);
+                const std::array<double, 7> &q,
+                const std::array<double, 16> &F_T_EE,
+                const std::array<double, 16> &EE_T_K) {
+               return model.zeroJacobian(frame, q, F_T_EE, EE_T_K);
              });
   mod.method("get_mass",
-             [](const franka::Model &model, const franka::RobotState *state) {
-               return model.mass(*state);
+             [](const franka::Model &model, const franka::RobotState &state) {
+               return model.mass(state);
              });
   mod.method("get_mass",
-             [](const franka::Model &model, const std::array<double, 7> *q,
-                const std::array<double, 9> *I_total, double m_total,
-                const std::array<double, 3> *F_x_Ctotal) {
-               return model.mass(*q, *I_total, m_total, *F_x_Ctotal);
+             [](const franka::Model &model, const std::array<double, 7> &q,
+                const std::array<double, 9> &I_total, double m_total,
+                const std::array<double, 3> &F_x_Ctotal) {
+               return model.mass(q, I_total, m_total, F_x_Ctotal);
              });
   mod.method("get_coriolis",
-             [](const franka::Model &model, const franka::RobotState *state) {
-               return model.coriolis(*state);
+             [](const franka::Model &model, const franka::RobotState &state) {
+               return model.coriolis(state);
              });
   mod.method("get_coriolis",
-             [](const franka::Model &model, const std::array<double, 7> *q,
-                const std::array<double, 7> *dq,
-                const std::array<double, 9> *I_total, double m_total,
-                const std::array<double, 3> *F_x_Ctotal) {
-               return model.coriolis(*q, *dq, *I_total, m_total, *F_x_Ctotal);
+             [](const franka::Model &model, const std::array<double, 7> &q,
+                const std::array<double, 7> &dq,
+                const std::array<double, 9> &I_total, double m_total,
+                const std::array<double, 3> &F_x_Ctotal) {
+               return model.coriolis(q, dq, I_total, m_total, F_x_Ctotal);
              });
   mod.method("get_gravity",
-             [](const franka::Model &model, const franka::RobotState *state) {
-               return model.gravity(*state);
+             [](const franka::Model &model, const franka::RobotState &state) {
+               return model.gravity(state);
              });
   mod.method("get_gravity",
-             [](const franka::Model &model, const franka::RobotState *state,
+             [](const franka::Model &model, const franka::RobotState &state,
                 const std::array<double, 3> &gravity_earth) {
-               return model.gravity(*state, gravity_earth);
+               return model.gravity(state, gravity_earth);
              });
   mod.method("get_gravity",
-             [](const franka::Model &model, const std::array<double, 7> *q,
-                double m_total, const std::array<double, 3> *F_x_Ctotal) {
-               return model.gravity(*q, m_total, *F_x_Ctotal);
+             [](const franka::Model &model, const std::array<double, 7> &q,
+                double m_total, const std::array<double, 3> &F_x_Ctotal) {
+               return model.gravity(q, m_total, F_x_Ctotal);
              });
   mod.method("get_gravity",
-             [](const franka::Model &model, const std::array<double, 7> *q,
-                double m_total, const std::array<double, 3> *F_x_Ctotal,
+             [](const franka::Model &model, const std::array<double, 7> &q,
+                double m_total, const std::array<double, 3> &F_x_Ctotal,
                 const std::array<double, 3> &gravity_earth) {
-               return model.gravity(*q, m_total, *F_x_Ctotal, gravity_earth);
+               return model.gravity(q, m_total, F_x_Ctotal, gravity_earth);
              });
 
   mod.add_type<franka::Torques>("Torques");
@@ -357,13 +327,34 @@ JLCXX_MODULE define_julia_module(jlcxx::Module &mod) {
   NAMED_MUTABLE_ARRAY_GETTER(franka::CartesianVelocities,
                              _get_finishable_data_generic, O_dP_EE);
 
-  mod.add_type<RobotInterface>("RobotInterface")
+  mod.add_type<franka::Robot>("Robot")
       .constructor<const std::string &>()
-      .method("set_default_behavior!", &RobotInterface::SetDefaultBehavior)
       .method("automatic_error_recovery!",
-              &RobotInterface::AutomaticErrorRecovery)
-      .method("read_once", &RobotInterface::ReadOnce)
-      .method("load_model", &RobotInterface::LoadModel)
+              &franka::Robot::automaticErrorRecovery)
+      .method("read_once", &franka::Robot::readOnce)
+      .method("load_model", &franka::Robot::loadModel)
+      .method("server_version", &franka::Robot::serverVersion)
+      .method(
+          "set_collision_behavior!",
+          static_cast<void (franka::Robot::*)(
+              const std::array<double, 7> &, const std::array<double, 7> &,
+              const std::array<double, 6> &, const std::array<double, 6> &)>(
+              &franka::Robot::setCollisionBehavior))
+      .method(
+          "set_collision_behavior!",
+          static_cast<void (franka::Robot::*)(
+              const std::array<double, 7> &, const std::array<double, 7> &,
+              const std::array<double, 7> &, const std::array<double, 7> &,
+              const std::array<double, 6> &, const std::array<double, 6> &,
+              const std::array<double, 6> &, const std::array<double, 6> &)>(
+              &franka::Robot::setCollisionBehavior))
+      .method("set_cartesian_impedance!", &franka::Robot::setCartesianImpedance)
+      .method("set_joint_impedance!", &franka::Robot::setJointImpedance)
+      .method("set_guiding_mode!", &franka::Robot::setGuidingMode)
+      .method("set_K!", &franka::Robot::setK)
+      .method("set_EE!", &franka::Robot::setEE)
+      .method("set_load!", &franka::Robot::setLoad)
+      .method("stop!", &franka::Robot::stop)
       .NAMED_CONTROL(Torques)
       .NAMED_CONTROL(JointPositions)
       .NAMED_CONTROL_GENERATOR(JointPositions)
