@@ -46,7 +46,7 @@ function _controller_wrapper!(
 end
 
 function control!(
-    robot::RobotInterface,
+    robot::Robot,
     controller::AbstractRobotController{OutputT},
 ) where {OutputT}
     c_controller_function_ptr = @safe_cfunction(
@@ -68,7 +68,7 @@ function control!(
 end
 
 function control!(
-    robot::RobotInterface,
+    robot::Robot,
     controller::AbstractRobotController{Torques},
     generator::AbstractRobotController{OutputT}
 ) where {OutputT}

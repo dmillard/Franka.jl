@@ -23,6 +23,7 @@ target_link_libraries(frankajl PRIVATE
   Eigen3::Eigen
 )
 target_compile_options(frankajl PRIVATE -Wall -Wextra -pedantic -Werror)
+target_compile_features(frankajl PRIVATE cxx_std_17)
 
 install(TARGETS
   frankajl
